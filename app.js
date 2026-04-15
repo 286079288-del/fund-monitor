@@ -9,15 +9,27 @@ const App = {
         this.renderFundList();
         this.updateDashboard();
         this.bindEvents();
+        this.showTradingStatus();
         this.startAutoRefresh();
         this.refreshAllFunds();
+    },
+
+    showTradingStatus() {
+        const banner = document.getElementById('tradingStatus');
+        if (!FinanceAPI.isTradingTime()) {
+            const dayInfo = FinanceAPI.getLastTradingDayInfo();
+            banner.innerHTML = `💤 当前非交易时间，显示的是 <strong>${dayInfo}</strong> 收盘数据。交易日 9:30-15:00 自动刷新。`;
+            banner.style.display = 'block';
+        } else {
+            banner.style.display = 'none';
+        }
     },
 
     bindEvents() {
         document.getElementById('btnAddFund').addEventListener('click', () => this.openAddModal());
         document.getElementById('closeModal').addEventListener('click', () => this.closeAddModal());
         document.getElementById('btnCancelAdd').addEventListener('click', () => this.closeAddModal());
-        document.getElementById('btnRefresh').addEventListener('click', () => { localStorage.removeItem('fund_monitor_data'); location.reload(); });
+        document.getElementById('btnRefresh').addEventListener('click', () => this.refreshAllFunds());
         document.getElementById('btnSearchFund').addEventListener('click', () => this.searchFundInfo());
         document.getElementById('inputFundCode').addEventListener('keypress', e => { if (e.key === 'Enter') this.searchFundInfo(); });
         document.getElementById('btnConfirmAdd').addEventListener('click', () => this.confirmAddFund());
@@ -52,9 +64,7 @@ const App = {
         const code = document.getElementById('inputFundCode').value.trim();
         if (!code) return;
         let tsCode = code;
-        if (!code.includes('.')) {
-            tsCode = code + '.OF'; // 场外默认
-        }
+        if (!code.includes('.')) tsCode = code + '.OF';
         const resultDiv = document.getElementById('searchResult');
         resultDiv.style.display = 'block';
         resultDiv.innerHTML = '<p style="text-align:center;color:var(--text-muted);font-size:12px">查询中...</p>';
@@ -100,26 +110,39 @@ const App = {
         const bar = document.getElementById('loadingBar');
         const barInner = document.getElementById('loadingBarInner');
         const progress = document.getElementById('refreshProgress');
+        const statusEl = document.getElementById('refreshStatus');
 
         btn.disabled = true;
+        btn.innerHTML = '⏳ 加载中...';
         bar.style.display = 'block';
+        statusEl.textContent = '正在获取净值数据...';
+
         let upCount = 0, downCount = 0, flatCount = 0, alertCount = 0;
         let totalProfit = 0, totalUpProfit = 0, totalDownProfit = 0;
+        let errorCount = 0, emptyCount = 0;
 
         const batchSize = 3;
         for (let i = 0; i < funds.length; i += batchSize) {
             const batch = funds.slice(i, i + batchSize);
-            progress.textContent = `${Math.min(i + batchSize, funds.length)}/${funds.length}`;
-            barInner.style.width = `${(i / funds.length) * 100}%`;
+            const done = Math.min(i + batchSize, funds.length);
+            progress.textContent = `${done}/${funds.length}`;
+            barInner.style.width = `${(done / funds.length) * 100}%`;
 
             const promises = batch.map(async (fund) => {
                 try {
-                    const navData = await FinanceAPI.getFundNav(fund.ts_code, 5);
+                    const navData = await FinanceAPI.getFundNav(fund.ts_code, 10);
+                    if (!navData || navData.length === 0) {
+                        fund._error = true;
+                        fund._errorMsg = '暂无净值数据';
+                        emptyCount++;
+                        return;
+                    }
                     DataManager.updateNav(fund.ts_code, navData);
                     const change = FinanceAPI.calcChange(navData);
-                    fund._change = change;
                     fund._error = false;
+                    fund._errorMsg = '';
                     if (change) {
+                        fund._change = change;
                         if (change.change > 0) upCount++;
                         else if (change.change < 0) downCount++;
                         else flatCount++;
@@ -133,18 +156,24 @@ const App = {
                             this.showToast('warning', fund.name.substring(0,10)+'...',
                                 `涨跌 ${(change.change>0?'+':'')}${change.change.toFixed(2)}%  盈亏 ¥${profit.toFixed(2)}`);
                         }
+                    } else {
+                        fund._change = null;
+                        flatCount++;
                     }
-                } catch (e) { fund._error = true; fund._change = null; }
+                } catch (e) {
+                    fund._error = true;
+                    fund._errorMsg = '查询失败';
+                    fund._change = null;
+                    errorCount++;
+                }
             });
             await Promise.allSettled(promises);
-            // 每批渲染一次
             this.renderFundList();
         }
 
         barInner.style.width = '100%';
         progress.textContent = `${funds.length}/${funds.length} ✓`;
 
-        // 更新汇总
         const totalAsset = funds.reduce((s, f) => s + (f.amount || 0), 0);
         document.getElementById('totalAsset').textContent = `¥${totalAsset.toLocaleString('zh-CN', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
         const profitEl = document.getElementById('todayProfit');
@@ -152,9 +181,17 @@ const App = {
         profitEl.className = 'strong ' + (totalProfit > 0 ? 'up' : totalProfit < 0 ? 'down' : '');
 
         this.updateDashboard({ upCount, downCount, flatCount, alertCount, totalUpProfit, totalDownProfit });
+
+        const dayInfo = FinanceAPI.getLastTradingDayInfo();
+        let statusText = `${dayInfo}数据 · `;
+        if (errorCount > 0) statusText += `${errorCount}个查询失败 · `;
+        statusText += `更新于 ${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`;
+        statusEl.textContent = statusText;
+
         document.getElementById('lastUpdate').textContent = new Date().toLocaleString('zh-CN');
         setTimeout(() => { bar.style.display = 'none'; barInner.style.width = '0'; }, 1000);
         btn.disabled = false;
+        btn.innerHTML = '🔄 刷新净值';
         DataManager.save();
     },
 
@@ -177,24 +214,27 @@ const App = {
         }
 
         let html = `<table class="fund-table"><thead><tr>
-            <th>基金名称</th><th class="num">净值</th><th class="change">涨跌幅</th><th class="amount">持仓</th><th class="profit">今日盈亏</th><th class="act"></th>
+            <th>基金名称</th><th class="num">最新净值</th><th class="num">日期</th><th class="change">涨跌幅</th><th class="amount">持仓</th><th class="profit">盈亏</th><th class="act"></th>
         </tr></thead><tbody>`;
 
         filtered.forEach(fund => {
             const change = fund._change || FinanceAPI.calcChange(fund.navData);
             const dir = change ? (change.change > 0 ? 'up' : change.change < 0 ? 'down' : 'flat') : '';
             const changeStr = change ? `${change.change>0?'+':''}${change.change.toFixed(2)}%` : '--';
-            const navStr = change ? change.currentNav.toFixed(4) : '--';
+            const navStr = change ? change.currentNav.toFixed(4) : (fund.navData && fund.navData.length ? parseFloat(fund.navData[0].unit_nav).toFixed(4) : '--');
+            const navDateStr = change ? this._fmtDate(change.navDate) : (fund.navData && fund.navData.length ? this._fmtDate(fund.navData[fund.navData.length-1].nav_date) : '--');
             const rowClass = fund._alert ? 'alert-row' : fund._error ? 'error-row' : '';
             const profit = fund.amount && change ? fund.amount * change.change / 100 : null;
             const profitStr = profit !== null ? `${profit>=0?'+':''}${profit.toFixed(2)}` : '--';
             const profitDir = profit !== null ? (profit > 0 ? 'up' : profit < 0 ? 'down' : '') : '';
             const alertTag = fund._alert ? '<span class="fund-alert-tag">⚠️</span>' : '';
-            const shortName = fund.name.length > 16 ? fund.name.substring(0,16)+'...' : fund.name;
+            const errorTag = fund._error ? '<span class="fund-error-tag" title="'+(fund._errorMsg||'查询失败')+'">❌</span>' : '';
+            const shortName = fund.name.length > 14 ? fund.name.substring(0,14)+'...' : fund.name;
 
             html += `<tr class="${rowClass}">
-                <td><div class="fund-name-cell"><span class="fund-name-text" title="${fund.name}">${shortName}${alertTag}</span><span class="fund-code-text">${fund.ts_code}</span></div></td>
+                <td><div class="fund-name-cell"><span class="fund-name-text" title="${fund.name}">${shortName}${alertTag}${errorTag}</span><span class="fund-code-text">${fund.ts_code}</span></div></td>
                 <td class="num"><span class="fund-nav-val">${navStr}</span></td>
+                <td class="num nav-date-cell">${navDateStr}</td>
                 <td class="fund-change-cell"><span class="fund-change-val ${dir}">${changeStr}</span></td>
                 <td class="num"><span class="fund-amount-val">${fund.amount ? '¥'+fund.amount.toLocaleString() : '--'}</span></td>
                 <td class="num"><span class="fund-profit-val ${profitDir}">${profitStr}</span></td>
@@ -204,6 +244,11 @@ const App = {
 
         html += '</tbody></table>';
         container.innerHTML = html;
+    },
+
+    _fmtDate(d) {
+        if (!d || d.length < 8) return d || '--';
+        return d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8);
     },
 
     removeFund(tsCode) {
@@ -232,14 +277,22 @@ const App = {
     async loadNews() {
         const src = document.getElementById('newsSource').value;
         const btn = document.getElementById('btnLoadNews');
+        const newsContainer = document.getElementById('newsList');
         btn.disabled = true; btn.textContent = '加载中...';
+        newsContainer.innerHTML = '<div class="empty-state"><p>🔄 正在获取新闻...</p><p class="empty-hint">尝试多个新闻源，请稍候</p></div>';
         try {
-            const end = new Date(); const start = new Date(end); start.setHours(start.getHours() - 4);
-            const news = await FinanceAPI.getNews(src, start, end);
-            this.newsData = this.enrichNews(news);
-            this.renderNews();
-            document.getElementById('statNews').textContent = this.newsData.length;
-        } catch (e) { this.showToast('danger', '加载失败', e.message); }
+            const news = await FinanceAPI.getNews(src);
+            if (news.length === 0) {
+                newsContainer.innerHTML = '<div class="empty-state"><div class="empty-icon">📰</div><p>暂无新闻数据</p><p class="empty-hint">可能是网络或跨域限制，请稍后重试</p></div>';
+            } else {
+                this.newsData = this.enrichNews(news);
+                this.renderNews();
+                document.getElementById('statNews').textContent = this.newsData.length;
+            }
+        } catch (e) {
+            newsContainer.innerHTML = `<div class="empty-state"><div class="empty-icon">❌</div><p>加载失败</p><p class="empty-hint">${e.message}</p></div>`;
+            this.showToast('danger', '新闻加载失败', e.message);
+        }
         btn.disabled = false; btn.textContent = '加载';
     },
 
@@ -266,14 +319,13 @@ const App = {
         else if (this.newsFilter==='negative') filtered=this.newsData.filter(n=>n.sentiment==='negative');
         else if (this.newsFilter==='positive') filtered=this.newsData.filter(n=>n.sentiment==='positive');
         if (!filtered.length) { container.innerHTML = '<div class="empty-state"><p>该分类暂无新闻</p></div>'; return; }
-        const srcMap = {sina:'新浪',cls:'财联社',eastmoney:'东财','10jqka':'同花顺',wallstreetcn:'华尔街见闻',yicai:'一财'};
-        const src = document.getElementById('newsSource').value;
         container.innerHTML = filtered.map(item => {
             const c = (item.content||item.title||'').substring(0,120) + ((item.content||'').length>120?'...':'');
             const kwHtml = (item.matchedKeywords||[]).map(k=>`<span class="news-keyword ${k.type}">${k.word}</span>`).join('');
             const fHtml = (item.matchedFunds&&item.matchedFunds.length) ? `<div class="news-match-funds">🔗 ${item.matchedFunds.join(', ')}</div>` : '';
+            const src = item._source || '';
             return `<div class="news-item ${item.sentiment==='negative'?'negative':item.sentiment==='positive'?'positive':''} ${item.isAlert?'alert':''}">
-                <div class="news-time">${item.datetime||'--'}<span class="news-source">${srcMap[src]||src}</span></div>
+                <div class="news-time">${item.datetime||'--'}${src ? '<span class="news-source">'+src+'</span>' : ''}</div>
                 <div class="news-content">${c}</div>
                 ${kwHtml?`<div class="news-keywords">${kwHtml}</div>`:''}${fHtml}</div>`;
         }).join('');
