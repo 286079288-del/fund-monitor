@@ -29,6 +29,8 @@
         </div>
     </header>
 
+    <div class="trading-status-banner" id="tradingStatus" style="display:none"></div>
+
     <section class="dashboard">
         <div class="stat-card stat-total"><div class="stat-label">持有基金</div><div class="stat-value" id="statTotal">0</div></div>
         <div class="stat-card stat-up"><div class="stat-label">今日上涨</div><div class="stat-value" id="statUp">--</div><div class="stat-sub" id="statUpTotal">--</div></div>
@@ -47,7 +49,7 @@
             <div class="summary-bar" id="summaryBar">
                 <div class="summary-item total">总资产: <strong id="totalAsset">¥--</strong></div>
                 <div class="summary-item profit">今日盈亏: <strong id="todayProfit">¥--</strong></div>
-                <div class="summary-item">刷新中... <strong id="refreshProgress">0/0</strong></div>
+                <div class="summary-item"><strong id="refreshProgress">0/0</strong> <span id="refreshStatus">等待刷新...</span></div>
             </div>
             <div class="loading-bar" id="loadingBar" style="display:none"><div class="loading-bar-inner" id="loadingBarInner"></div></div>
             <div class="fund-list-wrap" id="fundList">
