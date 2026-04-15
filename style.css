@@ -17,6 +17,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .btn-cancel{background:var(--bg-card);color:var(--text-secondary);border:1px solid var(--border)}.btn-cancel:hover{background:var(--bg-card-hover)}
 .btn-sm{padding:4px 10px;font-size:11px}
 
+/* === Trading Status Banner === */
+.trading-status-banner{background:linear-gradient(90deg,rgba(245,166,35,.12),rgba(74,144,255,.08));border-bottom:1px solid var(--border);padding:8px 20px;text-align:center;font-size:12px;color:var(--text-secondary);max-width:1400px;margin:0 auto}
+.trading-status-banner strong{color:var(--color-warning)}
+
 /* === Dashboard === */
 .dashboard{max-width:1400px;margin:12px auto;padding:0 20px;display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
 .stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 12px;text-align:center;transition:all .15s;position:relative;overflow:hidden}
@@ -147,6 +151,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 
 /* === Footer === */
 .footer{text-align:center;padding:12px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border)}
+
+/* === Error & Alert Tags === */
+.error-row{opacity:.55}.error-row:hover{opacity:.8}
+.fund-error-tag{font-size:10px;cursor:help;margin-left:3px}
+.nav-date-cell{font-size:11px;color:var(--text-muted)}
+.fund-change-val.flat{color:var(--color-flat)}
 
 /* === Responsive === */
 @media(max-width:1024px){
